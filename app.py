@@ -1,59 +1,24 @@
-import io
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pandas as pd
 import plotly.graph_objects as go
-import requests
 import streamlit as st
 from plotly.subplots import make_subplots
 
 st.set_page_config(page_title="NT倍率チャート", page_icon="📈", layout="wide")
 
-STOOQ_URL = "https://stooq.com/q/d/l/?s={symbol}&d1={start}&d2={end}&i=d&apikey={apikey}"
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; nt-chart/1.0)"}
-
-
-def get_apikey() -> str:
-    try:
-        return st.secrets["STOOQ_APIKEY"]
-    except Exception:
-        return os.environ.get("STOOQ_APIKEY", "")
+CSV_PATH = os.path.join(os.path.dirname(__file__), "nt_ratio.csv")
 
 
 @st.cache_data(ttl=3600)
-def fetch_data(years: int) -> pd.DataFrame:
-    apikey = get_apikey()
-    end = date.today()
-    start = end - timedelta(days=int(years * 365.25))
-
-    def fetch(symbol: str) -> pd.DataFrame:
-        url = STOOQ_URL.format(
-            symbol=symbol,
-            start=start.strftime("%Y%m%d"),
-            end=end.strftime("%Y%m%d"),
-            apikey=apikey,
-        )
-        r = requests.get(url, headers=HEADERS, timeout=30)
-        r.raise_for_status()
-        text = r.text.strip()
-        if not text or "apikey" in text.lower():
-            raise RuntimeError("APIキーが無効です")
-        if text.lower().startswith("no data"):
-            raise RuntimeError(f"データなし: {symbol}")
-        df = pd.read_csv(io.StringIO(text))
-        df.columns = df.columns.str.strip()
-        if "Date" not in df.columns or "Close" not in df.columns:
-            raise RuntimeError(f"Stooqが想定外の応答を返しました: {text[:200]}")
-        df["Date"] = pd.to_datetime(df["Date"])
-        return df[["Date", "Close"]].dropna().sort_values("Date")
-
-    nikkei = fetch("^nkx")
-    topix = fetch("^tpx")
-    merged = nikkei.merge(topix, on="Date", suffixes=("_n", "_t"))
-    merged.columns = ["Date", "Nikkei", "TOPIX"]
-    merged["NT"] = (merged["Nikkei"] / merged["TOPIX"]).round(4)
-    return merged
+def load_data(years: int) -> pd.DataFrame:
+    if not os.path.exists(CSV_PATH):
+        raise FileNotFoundError("nt_ratio.csv が見つかりません。ローカルでfetch_nt_data.pyを実行してください。")
+    df = pd.read_csv(CSV_PATH)
+    df["Date"] = pd.to_datetime(df["Date"])
+    cutoff = df["Date"].max() - timedelta(days=int(years * 365.25))
+    return df[df["Date"] >= cutoff].reset_index(drop=True)
 
 
 def build_chart(df: pd.DataFrame) -> go.Figure:
@@ -120,8 +85,8 @@ with col3:
         st.cache_data.clear()
 
 try:
-    with st.spinner("データ取得中..."):
-        df = fetch_data(years)
+    with st.spinner("データ読み込み中..."):
+        df = load_data(years)
 
     st.plotly_chart(build_chart(df), use_container_width=True)
 
