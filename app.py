@@ -39,7 +39,12 @@ def fetch_data(years: int) -> pd.DataFrame:
         text = r.text.strip()
         if not text or "apikey" in text.lower():
             raise RuntimeError("APIキーが無効です")
+        if text.lower().startswith("no data"):
+            raise RuntimeError(f"データなし: {symbol}")
         df = pd.read_csv(io.StringIO(text))
+        df.columns = df.columns.str.strip()
+        if "Date" not in df.columns or "Close" not in df.columns:
+            raise RuntimeError(f"Stooqが想定外の応答を返しました: {text[:200]}")
         df["Date"] = pd.to_datetime(df["Date"])
         return df[["Date", "Close"]].dropna().sort_values("Date")
 
